@@ -137,6 +137,7 @@ void loop()
     memcpy(pktBuf + HEADER_LEN, uplinkBuf, sizeof(uplinkBuf));                // add for part 10
     rf69.send(pktBuf, sizeof(pktBuf));                                        // add for part 10
     Serial.println("Data sending...");                                        // add for part 10
+    rf69.send(txBuf, sizeof(txBuf));
     rf69.waitPacketSent();                                                    // add for part 10
     Serial.println("Data sent");
     RFSend = false;
@@ -157,22 +158,47 @@ void loop()
       // }
       // NEW — receive into pktBuf, then check header:
       uint8_t pktLen = sizeof(pktBuf);                                // add for part 10
-      if (rf69.recv(pktBuf, &pktLen)){                                // add this if for part 10
-          if (pktBuf[0] != PREAMBLE || pktBuf[1] != MY_ADDR){
-              // Header check failed — not our packet, discard
-              Serial.println("Packet not addressed to us -- discarding");
-              GotMsg = false;
-          } else {
-              // Valid! Strip header, copy payload into dnlinkBuf
-              memcpy(dnlinkBuf, pktBuf + HEADER_LEN, pktLen - HEADER_LEN);
-              Serial.println("Valid reply received!");
-              GotMsg = true;
-          }
+      // if (rf69.recv(pktBuf, &pktLen)){                                // add this if for part 10
+      //     if (pktBuf[0] != PREAMBLE || pktBuf[1] != MY_ADDR){
+      //         // Header check failed — not our packet, discard
+      //         Serial.println("Packet not addressed to us -- discarding");
+      //         GotMsg = false;
+      //     } else {
+      //         // Valid! Strip header, copy payload into dnlinkBuf
+      //         memcpy(dnlinkBuf, pktBuf + HEADER_LEN, pktLen - HEADER_LEN);
+      //         Serial.println("Valid reply received!");
+      //         GotMsg = true;
+      //     }
+      // }
+      // else{
+      //   Serial.println("recv failed");
+      //   GotMsg = false;
+      // }
+      // ── Receive into a 36-byte buffer (35 header+payload + 1 checksum) ─────
+      uint8_t rxBuf[sizeof(pktBuf) + 1];
+      uint8_t rxLen = sizeof(rxBuf);
+      if (rf69.recv(rxBuf, &rxLen)) {
+        // Step 1: verify XOR checksum (all 36 bytes XOR'd must equal 0)
+        uint8_t verify = 0;
+        for (int i = 0; i < rxLen; i++) {
+          verify ^= rxBuf[i];
+        }
+        if (verify != 0) {
+          Serial.println("BAD CHECKSUM — corrupted packet, discarding");
+          // Treated same as lost packet — do nothing, loop continues
+        }
+        // Step 2: address check (from Part 10)
+        else if (rxBuf[0] != PREAMBLE || rxBuf[1] != MY_ADDR) {
+          Serial.println("Not our packet — discarding");
+        }
+        // Step 3: valid! strip header and checksum, copy payload
+        else {
+          memcpy(dnlinkBuf, rxBuf + HEADER_LEN, SMBUS_MAX_BYTES);
+          GotMsg = true;
+          Serial.println("Valid packet received");
+        }
       }
-      else{
-        Serial.println("recv failed");
-        GotMsg = false;
-      }
+      // ─────────────────────────────────────────────────────────────────────
     }
     else{
       Serial.println("No reply, is rf69_server running?");
