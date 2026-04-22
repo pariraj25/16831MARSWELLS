@@ -142,22 +142,47 @@ void loop()
     //   Serial.println();
     //   GotMsg = true;
     // }
-    // NEW — receive into pktBuf, then check header: // add part 10
-    uint8_t pktLen = sizeof(pktBuf);
-    if (rf69.recv(pktBuf, &pktLen)){
-        if (pktBuf[0] != PREAMBLE || pktBuf[1] != MY_ADDR){
-            // Header check failed — not our packet, discard silently
-            Serial.println("Not our packet -- discarding");
-            // GotMsg stays false — loop continues
-        } else {
-            // Valid! Strip header, copy payload into uplinkBuf
-            memcpy(uplinkBuf, pktBuf + HEADER_LEN, pktLen - HEADER_LEN);
-            Serial.println("Valid packet received!");
-            GotMsg = true;
-        }
+    // ── Receive into a 36-byte buffer (35 header+payload + 1 checksum) ─────
+    uint8_t rxBuf[sizeof(pktBuf) + 1];
+    uint8_t rxLen = sizeof(rxBuf);
+    if (rf69.recv(rxBuf, &rxLen)) {
+      
+        // Step 1: verify XOR checksum (all 36 bytes XOR'd must equal 0)
+        uint8_t verify = 0;
+        for (int i = 0; i < rxLen; i++) {
+          verify ^= rxBuf[i];
     }
-    else Serial.println("recv failed");
-  }
+    if (verify != 0) {
+        Serial.println("BAD CHECKSUM — corrupted packet, discarding");
+        // Treated same as lost packet — do nothing, loop continues
+    }
+    // Step 2: address check (from Part 10)
+    else if (rxBuf[0] != PREAMBLE || rxBuf[1] != MY_ADDR) {
+        Serial.println("Not our packet — discarding");
+    }
+    // Step 3: valid! strip header and checksum, copy payload into uplinkBuf
+    else {
+        memcpy(uplinkBuf, rxBuf + HEADER_LEN, SMBUS_MAX_BYTES);
+        GotMsg = true;
+        Serial.println("Valid packet received");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
+  //       if (pktBuf[0] != PREAMBLE || pktBuf[1] != MY_ADDR){
+  //           // Header check failed — not our packet, discard silently
+  //           Serial.println("Not our packet -- discarding");
+  //           // GotMsg stays false — loop continues
+  //       } else {
+  //           // Valid! Strip header, copy payload into uplinkBuf
+  //           memcpy(uplinkBuf, pktBuf + HEADER_LEN, pktLen - HEADER_LEN);
+  //           Serial.println("Valid packet received!");
+  //           GotMsg = true;
+  //       }
+  //   }
+  //   else Serial.println("recv failed");
+  // }
 
   // TODO add BLE receive if available (the send response via BLE too)
 
@@ -169,8 +194,9 @@ void loop()
       Serial.print(",");
     }
     Serial.println();
-    // rf69.send(dnlinkBuf, sizeof(dnlinkBuf)); // hide part 10
-    // rf69.waitPacketSent(); // hide part 10
+    
+    rf69.send(txBuf, sizeof(txBuf)); // was: rf69.send(pktBuf, sizeof(pktBuf));
+    rf69.waitPacketSent(); // hide part 10
     // NEW — build reply packet with header, then send: // add part 10
     pktBuf[0] = PREAMBLE;               // magic byte
     pktBuf[1] = DEST_ADDR;              // reply goes back to client
@@ -238,3 +264,14 @@ void requestEvent(){
   Serial.println("*******");
 }
 
+// ── XOR checksum: compute over all 35 bytes, append as byte 35 ─────────
+// pktBuf currently holds: [preamble][dest][src][32 payload bytes] = 35 bytes
+// We expand pktBuf by 1 byte in the transmit path:
+uint8_t txBuf[sizeof(pktBuf) + 1];
+memcpy(txBuf, pktBuf, sizeof(pktBuf));
+uint8_t chksum = 0;
+for (int i = 0; i < (int)sizeof(pktBuf); i++) {
+chksum ^= pktBuf[i];
+}
+txBuf[sizeof(pktBuf)] = chksum; // append checksum as final byte
+// ─────────────────────────────────────────────────────────────────────
