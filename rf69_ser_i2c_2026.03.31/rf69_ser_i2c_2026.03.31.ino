@@ -142,29 +142,32 @@ void loop()
     //   Serial.println();
     //   GotMsg = true;
     // }
-    // NEW — receive into pktBuf, then check header: // add part 10
-    uint8_t pktLen = sizeof(pktBuf);
-    if (rf69.recv(pktBuf, &pktLen)){
-      // Step 1: verify XOR checksum (all 36 bytes XOR'd must equal 0)
-      uint8_t verify = 0;
-      for (int i = 0; i < rxLen; i++) {
+    // ── Receive into a 36-byte buffer (35 header+payload + 1 checksum) ─────
+    uint8_t rxBuf[sizeof(pktBuf) + 1];
+    uint8_t rxLen = sizeof(rxBuf);
+    if (rf69.recv(rxBuf, &rxLen)) {
+      
+        // Step 1: verify XOR checksum (all 36 bytes XOR'd must equal 0)
+        uint8_t verify = 0;
+        for (int i = 0; i < rxLen; i++) {
           verify ^= rxBuf[i];
-        }
-        if (verify != 0) {
-            Serial.println("BAD CHECKSUM — corrupted packet, discarding");
-            // Treated same as lost packet — do nothing, loop continues
-        }
-        // Step 2: address check (from Part 10)
-        else if (rxBuf[0] != PREAMBLE || rxBuf[1] != MY_ADDR) {
-            Serial.println("Not our packet — discarding");
-        }
-        // Step 3: valid! strip header and checksum, copy payload
-        else {
-            memcpy(dnlinkBuf, rxBuf + HEADER_LEN, SMBUS_MAX_BYTES);
-            GotMsg = true;
-            Serial.println("Valid packet received");
-        }    
+    }
+    if (verify != 0) {
+        Serial.println("BAD CHECKSUM — corrupted packet, discarding");
+        // Treated same as lost packet — do nothing, loop continues
+    }
+    // Step 2: address check (from Part 10)
+    else if (rxBuf[0] != PREAMBLE || rxBuf[1] != MY_ADDR) {
+        Serial.println("Not our packet — discarding");
+    }
+    // Step 3: valid! strip header and checksum, copy payload into uplinkBuf
+    else {
+        memcpy(uplinkBuf, rxBuf + HEADER_LEN, SMBUS_MAX_BYTES);
+        GotMsg = true;
+        Serial.println("Valid packet received");
+    }
 }
+
 // ─────────────────────────────────────────────────────────────────────
 
   //       if (pktBuf[0] != PREAMBLE || pktBuf[1] != MY_ADDR){
